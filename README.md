@@ -346,6 +346,7 @@ jobs:
 | 4    | GitHub 환경 변수 설정       |
 | 5    | OS의 기본 환경변수           |
 #### 🔐 실무 예시
+```yaml
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -357,8 +358,202 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: aws s3 sync ./out s3://my-bucket-name
-
-
+```
+#### ✅ 요약 문장
+> 환경변수는 설정값을, Repository Secret은 민감한 정보를 안전하게 관리하기 위한 GitHub의 기능입니다.
+> CI/CD에서 API 키, 토큰, 비밀번호는 반드시 secrets에 넣고 사용해야 하며, GitHub Actions에서는 ${{ secrets.변수명 }} 형식으로 접근합니다.
 
 # 5. 배포 프로세스 정리
+## 🚀 GitHub Actions 기반 배포 프로세스 순서 정리
+### ✅ 1. 프로젝트 준비
+- 코드가 GitHub 리포지토리에 있어야 함
+- `npm run build`로 정적 빌드 결과물(`out/`, `dist/`, `.next/`) 생성 가능해야 함
+- `.gitignore`에 `node_modules/`, `dist/`, `.next/` 등 불필요한 빌드 아웃풋 포함
+
+### ✅ 2. S3 버킷 + CloudFront 준비 (한 번만 설정)
+- S3에 정적 웹사이트 호스팅 활성화
+- CloudFront 배포 생성 → S3를 origin으로 연결
+- OAC (Origin Access Control) 설정으로 S3 보안 강화
+- 배포 후 CloudFront 도메인 확인 (예: `https://d123.cloudfront.net`)
+
+### ✅ 3. GitHub Secrets 등록
+GitHub 리포지토리 → Settings → Secrets and variables → *** Actions ***
+| Key                     | Value                          |
+| ----------------------- | ------------------------------ |
+| `AWS_ACCESS_KEY_ID`     | IAM에서 발급한 키                    |
+| `AWS_SECRET_ACCESS_KEY` | IAM 비밀 키                       |
+| `AWS_REGION`            | 예: `ap-northeast-2`            |
+| `S3_BUCKET_NAME`        | 예: `my-bucket-name`            |
+| `DISTRIBUTION_ID`       | CloudFront 배포 ID (선택, 캐시 무효화용) |
+
+### ✅ 4. .github/workflows/deploy.yml 작성
+```yaml
+name: Deploy to S3
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Deploy to S3
+        uses: jakejarvis/s3-sync-action@master
+        with:
+          args: --acl public-read --delete
+        env:
+          AWS_S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          SOURCE_DIR: './out' # or './dist' or '.next'
+
+      - name: Invalidate CloudFront cache
+        if: success()
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.DISTRIBUTION_ID }} \
+            --paths "/*"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+```
+### ✅ 5. main 브랜치에 push
+- `git push origin main` 하면,
+- GitHub Actions가 자동으로 실행
+- `build → S3 업로드 → CloudFront 캐시 무효화`까지 자동으로 진행
+
+### ✅ 6. 배포 완료
+- CloudFront URL로 접근 → 새 빌드가 반영되어 있어야 함
+
+## 🧾 요약 순서 한 줄 요약
+1. GitHub에 프로젝트 올리기
+2. S3/CloudFront 미리 세팅
+3. GitHub Secrets에 AWS 키 등록
+4. `deploy.yml` 작성
+5. `main` 브랜치에 push
+6. GitHub Actions가 자동 배포 수행
+
+### ✅ Git 브랜치 전략
+| 브랜치    | 역할                                   |
+| ------ | ------------------------------------ |
+| `dev`  | 개발 브랜치 – 기능 개발, 테스트, 사내 배포 등         |
+| `main` | 상용 배포 브랜치 – CloudFront 통해 실제 유저에게 배포 |
+
+### ✅ 추천 GitHub Actions 구성 (브랜치 분리 배포)
+#### 1. dev 브랜치 push → 스테이징용 S3 버킷에 배포
+```yaml
+# .github/workflows/deploy-dev.yml
+name: Deploy to DEV S3
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    ...
+    env:
+      AWS_S3_BUCKET: ${{ secrets.DEV_S3_BUCKET_NAME }}
+      ...
+```
+
+#### 2. main 브랜치 push → 프로덕션용 S3 + CloudFront에 배포
+```yaml
+복사
+# .github/workflows/deploy-prod.yml
+name: Deploy to PROD (main)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    ...
+    env:
+      AWS_S3_BUCKET: ${{ secrets.PROD_S3_BUCKET_NAME }}
+      DISTRIBUTION_ID: ${{ secrets.PROD_DISTRIBUTION_ID }}
+      ...
+```
+
+#### ✅ GitHub Secrets 설정 (2세트 필요)
+| 환경   | 비밀키 이름 예시                                          |
+| ---- | -------------------------------------------------- |
+| DEV  | `DEV_S3_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, ...     |
+| PROD | `PROD_S3_BUCKET_NAME`, `PROD_DISTRIBUTION_ID`, ... |
+
+#### ✅ 실무 플로우 요약
+```plaintext
+dev 브랜치 → push →
+  GitHub Actions → 스테이징용 S3에 업로드 → (스테이징 URL로 확인)
+
+main 브랜치 → push →
+  GitHub Actions → 프로덕션 S3 업로드 + CloudFront 캐시 무효화 → (실제 배포)
+```
+
+#### 📌 실제 현업 예시
+| 브랜치    | 배포 위치                 | 사용처     |
+| ------ | --------------------- | ------- |
+| `dev`  | `staging.example.com` | QA 테스트용 |
+| `main` | `www.example.com`     | 실제 사용자용 |
+→ CloudFront 도메인을 분리하거나 S3 버킷을 따로 두는 식으로 분기함
+
+#### ✅ 추가 팁: PR 기반 워크플로우도 가능
+- `dev` → `main`으로 PR 만들 때 테스트 실행
+- `main` 머지되면 프로덕션 배포
+```yaml
+on:
+  pull_request:
+    branches: [main]
+```
+### 🔚 요약
+- GitHub Actions에서는 브랜치마다 workflow 분리해서 S3나 CloudFront에 다른 환경으로 배포 가능
+- dev는 사내 스테이징, main은 실서비스로 분리하는 방식이 가장 일반적
+- 각 브랜치마다 .yml 구성과 Secret 세트를 따로 지정하는 게 실무 관행입니다.
+
 # 6. S3 → CloudFront 성능 최적화 분석 보고
+## 📌 (1) 테스트 환경
+  - S3 버킷 웹사이트 엔드포인트: http://unseo-bucket.s3-website.ap-northeast-2.amazonaws.com/
+  - CloudFrount 배포 도메인 이름: https://d2dqy6mkzzv7cu.cloudfront.net/
+## 📝 (2)테스트 결과
+| **측정 지표**            | **S3 단독** | **CDN(CloudFront)** | **개선율**      |
+| -------------------- | --------- | ------------------- | ------------ |
+| **총 완료 시간**          | 8.60초     | 7.28초               | **15.3% ⬇️** |
+| **DOMContentLoaded** | 1.96초     | 884ms               | **54.9% ⬇️** |
+| **로드 완료 시점**         | 4.29초     | 1.85초               | **56.9% ⬇️** |
+| **전송 크기**            | 11.0MB    | 10.8MB              | **1.8% ⬇️**  |
+| **리소스 크기**           | 11.0MB    | 11.0MB              | 0%           |
+## ✅ (3) CDN 사용 후 성능 개선
+- 초기 렌더링(DOMContentLoaded) 속도가 약 2배 가까이 개선되어 사용자 체감 속도 상승
+- 전체 로딩 시간도 약 15% 단축, 페이지 전환 및 사용자 경험 개선
+- 리소스 크기는 동일하지만 전송 최적화로 인해 네트워크 효율성 향상
+- CloudFront 캐싱 및 분산 구조를 통해 정적 리소스 전달 속도가 눈에 띄게 향상됨
+
+## ✅ CloudFront 최적화 이점 요약
+- 지리적 캐싱: 사용자와 가까운 Edge Location에서 응답 → 지연 시간 감소
+- HTTP/2 지원: 병렬 다운로드 및 헤더 압축 지원으로 브라우저 성능 향상
+- 압축 및 캐싱 정책 적용 가능: Gzip/Brotli + TTL 조정
+- 보안 및 도메인 통합: HTTPS 인증서, 사용자 도메인 연결 가능 (e.g., cdn.mywebsite.com)
+
+## ✅ 추천 후속 조치
+- CloudFront에 대한 TTL 정책 최적화 (변경 빈도 낮은 리소스는 캐시 지속 시간 증가)
+- Gzip/Brotli 압축 설정 확인 (작은 js/css 파일이라도 더 빨라질 수 있음)
+- 정적 자산 버전 관리 (main.abcd1234.js 형태) 도입으로 캐시 무효화 효율 확보
