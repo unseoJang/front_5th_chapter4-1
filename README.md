@@ -8,10 +8,13 @@
 
 ## 1. 과제 개요
 
-	이번 4-1 과제는 GitHub와 AWS를 사용해 CDN이 적용된 프론트엔드 프로젝트 CI/CD 파이프라인을 구성합니다. 인프라 레벨 최적화, 특히 CDN을 사용한 최적화를 이해하고 성능 개선을 위한 사전 작업인 ‘모니터링’을 준비합니다.
+이번 4-1 과제는 GitHub와 AWS를 사용해 CDN이 적용된 프론트엔드 프로젝트 CI/CD 파이프라인을 구성합니다. 인프라 레벨 최적화, 특히 CDN을 사용한 최적화를 이해하고 성능 개선을 위한 사전 작업인 ‘모니터링’을 준비합니다.
+
 ---
 ## 2. 파이프라인 개요도
-	`(img-deploy-pipeline.jpeg)`
+
+![파이프라인 개요도](https://raw.githubusercontent.com/unseoJang/front_5th_chapter4-1/refs/heads/main/app/assets/images/img-deploy-pipeline.jpeg)
+
 ---
 ## 3. 주요 링크
 
@@ -538,6 +541,9 @@ on:
   - S3 버킷 웹사이트 엔드포인트: http://unseo-bucket.s3-website.ap-northeast-2.amazonaws.com/
   - CloudFrount 배포 도메인 이름: https://d2dqy6mkzzv7cu.cloudfront.net/
 ## 📝 (2)테스트 결과
+
+![성능 최적화 분석보고](https://raw.githubusercontent.com/unseoJang/front_5th_chapter4-1/refs/heads/main/app/assets/images/img-blank-board.jpeg)
+
 | **측정 지표**            | **S3 단독** | **CDN(CloudFront)** | **개선율**      |
 | -------------------- | --------- | ------------------- | ------------ |
 | **총 완료 시간**          | 8.60초     | 7.28초               | **15.3% ⬇️** |
